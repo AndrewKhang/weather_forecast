@@ -1,0 +1,54 @@
+from django.shortcuts import render
+import requests
+import os, json
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from weather import cache
+# Create your views here.
+
+@api_view(['GET'])
+def get_weather(request):
+    city = request.GET.get('city', 'Hanoi')
+    cached = cache.connection.get(f"weather:{city}")
+    if cached:
+        # Redis chỉ lưu string, nên phải convert dict <-> string
+        return Response(json.loads(cached)) # loads: string → dict (đọc từ Redis)
+    api_key = os.getenv('OPENWEATHER_API_KEY')
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
+    
+    response = requests.get(url)
+    data = response.json()
+    result={
+        "city": data["name"],
+        "country": data["sys"]["country"],
+        "temp": data["main"]["temp"],
+        "feels_like": data["main"]["feels_like"],
+        "humidity": data["main"]["humidity"],
+        "description": data["weather"][0]["description"],
+        "icon": data["weather"][0]["icon"],
+        "wind_speed": data["wind"]["speed"]
+     }
+    cache.connection.set(f"weather:{city}",json.dumps(result),ex=600) # dumps: dict → string (lưu vào Redis)
+    return Response(result)
+    
+@api_view(['GET'])
+def get_forecast(request):
+    city = request.GET.get('city', 'Hanoi')
+
+    cached = cache.connection.get(f"forecast:{city}")
+    if cached:
+        return Response(json.loads(cached))
+    api_key = os.getenv('OPENWEATHER_API_KEY')
+    url = f"https://api.openweathermap.org/data/2.5/forecast?q={city}&appid={api_key}&units=metric"
+    
+    response = requests.get(url)
+    data = response.json()
+    forecast_list = data["list"]
+    noon_forecasts = [item for item in forecast_list if "12:00:00" in item["dt_txt"]]
+    result={
+        "city": data["city"]["name"],
+        "forecast":noon_forecasts
+   }
+    cache.connection.set(f"forecast:{city}",json.dumps(result),ex=600)
+    return Response(result)
+
