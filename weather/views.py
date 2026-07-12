@@ -4,6 +4,7 @@ import os, json
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from weather import cache
+from weather.models import SearchHistory
 # Create your views here.
 
 @api_view(['GET'])
@@ -11,8 +12,10 @@ def get_weather(request):
     city = request.GET.get('city', 'Hanoi')
     cached = cache.connection.get(f"weather:{city}")
     if cached:
-        # Redis chỉ lưu string, nên phải convert dict <-> string
-        return Response(json.loads(cached)) # loads: string → dict (đọc từ Redis)
+         # Redis chỉ lưu string, nên phải convert dict <-> string
+        data = json.loads(cached)# loads: string → dict (đọc từ Redis)
+        SearchHistory.objects.create(city=city, country=data["country"])
+        return Response(data)
     api_key = os.getenv('OPENWEATHER_API_KEY')
     url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
     
@@ -28,6 +31,7 @@ def get_weather(request):
         "icon": data["weather"][0]["icon"],
         "wind_speed": data["wind"]["speed"]
      }
+    SearchHistory.objects.create(city=city, country=data["sys"]["country"])
     cache.connection.set(f"weather:{city}",json.dumps(result),ex=600) # dumps: dict → string (lưu vào Redis)
     return Response(result)
     
