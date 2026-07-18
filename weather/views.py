@@ -4,7 +4,8 @@ import os, json
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from weather import cache
-from weather.models import SearchHistory
+from weather.models import SearchHistory, FavoriteCity
+from .serializers import FavoriteCitySerializer
 # Create your views here.
 
 @api_view(['GET'])
@@ -56,3 +57,29 @@ def get_forecast(request):
     cache.connection.set(f"forecast:{city}",json.dumps(result),ex=600)
     return Response(result)
 
+# POST /api/favorites/ — thêm city vào favorite
+# GET /api/favorites/ — lấy danh sách favorites
+# DELETE /api/favorites/{city}/ — xóa favorite
+
+
+@api_view(['GET'])
+def get_favorites(request):
+    favorites = FavoriteCity.objects.all()
+    serializer = FavoriteCitySerializer(favorites, many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+def add_favorite(request):
+    serializer = FavoriteCitySerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=201)
+    return Response(serializer.errors, status=400)
+
+@api_view(['DELETE'])
+def delete_favorite(request, city):
+    favorite = FavoriteCity.objects.filter(city=city).first()
+    if not favorite:
+        return Response({"message": "City not found"}, status=404)
+    favorite.delete()
+    return Response({"message": f"{city} has been removed from favorites"}, status=204)
