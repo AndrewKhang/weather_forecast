@@ -8,4 +8,5 @@ urlpatterns = [
     path('favorites/', views.get_favorites),
     path('favorites/add/', views.add_favorite),
     path('favorites/<str:city>/', views.delete_favorite),
+    path('', views.index),
 ]

@@ -7,7 +7,8 @@ from weather import cache
 from weather.models import SearchHistory, FavoriteCity
 from .serializers import FavoriteCitySerializer
 # Create your views here.
-
+def index(request):
+    return render(request, 'index.html')
 @api_view(['GET'])
 def get_weather(request):
     city = request.GET.get('city', 'Hanoi')
