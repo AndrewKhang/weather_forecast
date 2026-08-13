@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from groq import Groq
 import requests
 import os, json
 from rest_framework.decorators import api_view
@@ -84,3 +85,22 @@ def delete_favorite(request, city):
         return Response({"message": "City not found"}, status=404)
     favorite.delete()
     return Response({"message": f"{city} has been removed from favorites"}, status=204)
+
+
+
+@api_view(['POST'])
+def chat(request):
+    message = request.data.get('message')
+    context = request.data.get('weather_context')
+    
+    client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+    
+    response = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": f"You are a weather assistant. Current weather context: {context}. Answer helpfully and concisely."},
+            {"role": "user", "content": message}
+        ]
+    )
+    
+    return Response({"reply": response.choices[0].message.content})
