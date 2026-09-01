@@ -245,6 +245,9 @@
           <div class="cw-stat"><div class="cw-stat-l">Feels</div><div class="cw-stat-v" id="cwFeels">&#8212;</div></div>
           <div class="cw-stat"><div class="cw-stat-l">Humid</div><div class="cw-stat-v" id="cwHumid">&#8212;</div></div>
           <div class="cw-stat"><div class="cw-stat-l">Wind</div><div class="cw-stat-v" id="cwWind">&#8212;</div></div>
+          <div class="cw-stat"><div class="cw-stat-l">Sunrise</div><div class="cw-stat-v" id="cwSunrise">&#8212;</div></div>
+          <div class="cw-stat"><div class="cw-stat-l">Sunset</div><div class="cw-stat-v" id="cwSunset">&#8212;</div></div>
+          <div class="cw-stat"><div class="cw-stat-l">Direction</div><div class="cw-stat-v" id="cwWindDir">&#8212;</div></div>
         </div>
       </div>
     </div>
@@ -294,16 +297,15 @@
   </div>
 </div>
 
-<!-- CHAT PANEL — placed before script so elements exist when JS runs -->
 <div class="chat-overlay" id="chatOverlay">
   <div class="chat-panel" id="chatPanel">
     <div class="chat-header">
-      <div class="chat-title">&#9997; Weather AI <span class="chat-ai-badge">Claude</span></div>
+      <div class="chat-title">&#9997; Weather AI <span class="chat-ai-badge">Groq</span></div>
       <button class="chat-close" onclick="closeChat()">&times;</button>
     </div>
     <div class="chat-context" id="chatContext">Search a city first to get weather-aware answers.</div>
     <div class="chat-messages" id="chatMessages">
-      <div class="msg ai">Hi! I'm your weather assistant powered by Claude. Ask me anything about the weather &mdash; like "Should I go hiking today?" or "What should I wear?"</div>
+      <div class="msg ai">Hi! I'm your weather assistant powered by Groq. Ask me anything about the weather &mdash; like "Should I go hiking today?" or "What should I wear?"</div>
     </div>
     <div class="chat-input-row">
       <input class="chat-input" id="chatInput" placeholder="Ask about the weather..." />
@@ -346,10 +348,21 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && chatOpen) 
 document.getElementById('chatInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
 });
-function updateChatContext(city, temp, humidity, desc, wind) {
-  weatherContext = city + ', ' + temp + '\u00b0C, humidity ' + humidity + '%, ' + desc + ', wind ' + wind + ' m/s';
-  document.getElementById('chatContext').textContent = '\uD83D\uDCCD ' + weatherContext;
+
+function updateChatContext(city, temp, humidity, desc, wind, forecast) {
+  // Build current weather context
+  const current = city + ', ' + temp + '\u00b0C, humidity ' + humidity + '%, ' + desc + ', wind ' + wind + ' kph';
+  // Build forecast context from WeatherAPI format
+  const forecastStr = forecast.slice(0, 5).map((day, i) => {
+    const d = new Date(day.date);
+    const name = i === 0 ? 'Today' : d.toLocaleDateString('en', {weekday: 'short', month: 'short', day: 'numeric'});
+    const pop = day.chance_of_rain || 0;
+    return name + ': ' + Math.round(day.avgtemp) + '\u00b0C, ' + day.condition + (pop > 0 ? ', rain ' + pop + '%' : '');
+  }).join(' | ');
+  weatherContext = current + ' | Forecast: ' + forecastStr;
+  document.getElementById('chatContext').textContent = '\uD83D\uDCCD ' + current;
 }
+
 async function sendChat() {
   const input = document.getElementById('chatInput');
   const msg = input.value.trim();
@@ -360,7 +373,7 @@ async function sendChat() {
   input.value = '';
   sendBtn.disabled = true;
   const typingId = 'typing-' + Date.now();
-  messages.innerHTML += '<div class="msg ai typing" id="' + typingId + '">Claude is thinking...</div>';
+  messages.innerHTML += '<div class="msg ai typing" id="' + typingId + '">Groq is thinking...</div>';
   messages.scrollTop = messages.scrollHeight;
   try {
     const res = await fetch(API + '/chat/', {
@@ -421,13 +434,8 @@ function tempClass(t) {
 function chartColor(avg) {
   if (avg >= 35) return '#ef4444'; if (avg >= 28) return '#f97316'; if (avg >= 18) return '#10b981'; if (avg >= 8) return '#3b82f6'; return '#8b5cf6';
 }
-function groupByDay(list) {
-  const days = {};
-  list.forEach(item => { const day = item.dt_txt.split(' ')[0]; if (!days[day]) days[day] = []; days[day].push(item); });
-  return days;
-}
 
-// Load weather
+// Load weather — WeatherAPI format
 async function loadWeather(city, fromWelcome) {
   const errEl = fromWelcome ? document.getElementById('welcomeErr') : document.getElementById('topErr');
   errEl.textContent = '';
@@ -440,9 +448,13 @@ async function loadWeather(city, fromWelcome) {
     if (!wR.ok) { errEl.textContent = 'City not found.'; if (fromWelcome) errEl.className = 'welcome-err show'; return; }
     const w = await wR.json();
     const f = await fR.json();
-    currentCity = w.city; currentCountry = w.country;
+    if (w.error) { errEl.textContent = 'City not found.'; if (fromWelcome) errEl.className = 'welcome-err show'; return; }
+
+    currentCity = w.city;
+    currentCountry = w.country;
     allForecast = f.forecast;
 
+    // Map marker
     if (w.coord) {
       setTimeout(() => {
         if (leafletMap) updateMapMarker(w.coord.lat, w.coord.lon, w.city, Math.round(w.temp));
@@ -452,6 +464,7 @@ async function loadWeather(city, fromWelcome) {
 
     if (fromWelcome) document.getElementById('welcome').classList.add('hide');
 
+    // Sidebar widget
     const widget = document.getElementById('cwWidget');
     widget.className = 'cw-widget ' + tempClass(w.temp);
     document.getElementById('cwCity').textContent = w.city;
@@ -460,16 +473,25 @@ async function loadWeather(city, fromWelcome) {
     document.getElementById('cwDesc').textContent = w.description;
     document.getElementById('cwFeels').textContent = Math.round(w.feels_like) + '\u00b0C';
     document.getElementById('cwHumid').textContent = w.humidity + '%';
-    document.getElementById('cwWind').textContent = w.wind_speed + ' m/s';
-    document.getElementById('cwIcon').src = 'https://openweathermap.org/img/wn/' + w.icon + '@2x.png';
-    updateChatContext(w.city, Math.round(w.temp), w.humidity, w.description, w.wind_speed);
+    document.getElementById('cwWind').textContent = w.wind_speed + ' kph';
+    document.getElementById('cwWindDir').textContent = w.wind_dir || '—';
+    document.getElementById('cwIcon').src = w.icon; // WeatherAPI returns full URL
+
+    // Sunrise/sunset from first forecast day astro
+    if (allForecast.length > 0) {
+      document.getElementById('cwSunrise').textContent = allForecast[0].sunrise || '—';
+      document.getElementById('cwSunset').textContent = allForecast[0].sunset || '—';
+    }
+
+    // Update AI context with both current + forecast
+    updateChatContext(w.city, Math.round(w.temp), w.humidity, w.description, w.wind_speed, allForecast);
 
     document.getElementById('mainPlaceholder').style.display = 'none';
     document.getElementById('mainContent').className = 'main-content show';
 
     renderDaily(allForecast);
     renderChart(allForecast);
-    renderHourly(allForecast.slice(0, 8));
+    renderHourly(allForecast[0].hours || []);
     updateFavBtn();
   } catch(e) {
     errEl.textContent = 'Cannot connect to server.';
@@ -477,65 +499,76 @@ async function loadWeather(city, fromWelcome) {
   }
 }
 
+// WeatherAPI: forecast is already grouped by day
 function renderDaily(list) {
-  const days = groupByDay(list);
-  const keys = Object.keys(days).slice(0, 5);
-  document.getElementById('dailyRow').innerHTML = keys.map((key, i) => {
-    const items = days[key];
-    const rep = items.find(x => x.dt_txt.includes('12:00')) || items[Math.floor(items.length/2)];
-    const t = Math.round(rep.main.temp);
-    const pop = Math.round((rep.pop || 0) * 100);
-    const d = new Date(rep.dt_txt);
-    const name = i === 0 ? 'Today' : d.toLocaleDateString('en', {weekday:'short'});
-    return '<div class="day-pill' + (i===0?' active':'') + '" id="dp-' + key + '" onclick="selectDay(\'' + key + '\')">' +
+  document.getElementById('dailyRow').innerHTML = list.map((day, i) => {
+    const d = new Date(day.date);
+    const name = i === 0 ? 'Today' : d.toLocaleDateString('en', {weekday: 'short'});
+    const t = Math.round(day.avgtemp);
+    const pop = day.chance_of_rain || 0;
+    return '<div class="day-pill' + (i === 0 ? ' active' : '') + '" id="dp-' + i + '" onclick="selectDay(' + i + ')">' +
       '<div class="dp-name">' + name + '</div>' +
-      '<img class="dp-icon" src="https://openweathermap.org/img/wn/' + rep.weather[0].icon + '.png" alt="">' +
+      '<img class="dp-icon" src="' + day.icon + '" alt="">' +
       '<div class="dp-temp">' + t + '\u00b0</div>' +
       (pop > 0 ? '<div class="dp-pop">\uD83D\uDCA7 ' + pop + '%</div>' : '') + '</div>';
   }).join('');
 }
 
-function selectDay(key) {
+function selectDay(idx) {
   document.querySelectorAll('.day-pill').forEach(p => p.classList.remove('active'));
-  const el = document.getElementById('dp-' + key);
+  const el = document.getElementById('dp-' + idx);
   if (el) el.classList.add('active');
-  const days = groupByDay(allForecast);
-  const d = new Date(key);
-  document.getElementById('hourlyTitle').textContent = 'Hourly breakdown \u2014 ' + d.toLocaleDateString('en', {weekday:'long', month:'short', day:'numeric'});
-  renderHourly(days[key] || []);
+  const day = allForecast[idx];
+  const d = new Date(day.date);
+  document.getElementById('hourlyTitle').textContent = 'Hourly breakdown \u2014 ' + d.toLocaleDateString('en', {weekday: 'long', month: 'short', day: 'numeric'});
+  renderHourly(day.hours || []);
 }
 
-function renderHourly(list) {
+// WeatherAPI hourly: time_epoch, temp_c, condition.icon, chance_of_rain
+function renderHourly(hours) {
   const now = new Date();
-  document.getElementById('hourlyScroll').innerHTML = list.map(item => {
-    const time = item.dt_txt.split(' ')[1].slice(0,5);
-    const t = Math.round(item.main.temp);
-    const pop = Math.round((item.pop || 0) * 100);
-    const isNow = Math.abs(new Date(item.dt_txt) - now) < 3 * 3600 * 1000;
+    const filtered = hours.filter((_, i) => i % 3 === 0);
+      document.getElementById('hourlyScroll').innerHTML = filtered.map(h => {    const time = h.time.split(' ')[1]; // "2026-08-13 14:00" → "14:00"
+    const t = Math.round(h.temp_c);
+    const pop = h.chance_of_rain || 0;
+    const hDate = new Date(h.time);
+    const isNow = Math.abs(hDate - now) < 3600 * 1000;
+    const icon = 'https:' + h.condition.icon;
     return '<div class="h-card' + (isNow ? ' now' : '') + '">' +
       '<div class="h-time">' + (isNow ? 'Now' : time) + '</div>' +
-      '<img class="h-icon" src="https://openweathermap.org/img/wn/' + item.weather[0].icon + '.png" alt="">' +
+      '<img class="h-icon" src="' + icon + '" alt="">' +
       '<div class="h-temp">' + t + '\u00b0</div>' +
       (pop > 0 ? '<div class="h-pop">' + pop + '%</div>' : '') + '</div>';
   }).join('');
 }
 
+// WeatherAPI: use avgtemp per day for chart
 function renderChart(list) {
-  const labels = list.map(i => { const p = i.dt_txt.split(' '); return new Date(p[0]).toLocaleDateString('en', {weekday:'short'}) + ' ' + p[1].slice(0,5); });
-  const temps = list.map(i => parseFloat(i.main.temp.toFixed(1)));
-  const avg = temps.reduce((a,b)=>a+b,0)/temps.length;
+  const labels = list.map(d => new Date(d.date).toLocaleDateString('en', {weekday: 'short', month: 'short', day: 'numeric'}));
+  const maxTemps = list.map(d => parseFloat(d.maxtemp.toFixed(1)));
+  const minTemps = list.map(d => parseFloat(d.mintemp.toFixed(1)));
+  const avg = list.reduce((a, d) => a + d.avgtemp, 0) / list.length;
   const color = chartColor(avg);
   if (chart) chart.destroy();
   const ctx = document.getElementById('tempChart').getContext('2d');
   chart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [{ data: temps, borderColor: color, backgroundColor: color + '15', pointRadius: 1, pointHoverRadius: 5, pointHoverBackgroundColor: color, fill: true, tension: 0.4, borderWidth: 2 }]},
+    data: {
+      labels,
+      datasets: [
+        { label: 'Max', data: maxTemps, borderColor: color, backgroundColor: color + '15', pointRadius: 3, pointHoverRadius: 5, fill: true, tension: 0.4, borderWidth: 2 },
+        { label: 'Min', data: minTemps, borderColor: color + '88', backgroundColor: 'transparent', pointRadius: 3, pointHoverRadius: 5, fill: false, tension: 0.4, borderWidth: 1.5, borderDash: [4, 3] }
+      ]
+    },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' ' + c.parsed.y + '\u00b0C' }, backgroundColor: '#1e2d45', titleColor: '#94a3b8', bodyColor: '#f1f5f9', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1 }},
+      plugins: {
+        legend: { display: true, labels: { color: '#94a3b8', font: { size: 10 } } },
+        tooltip: { callbacks: { label: c => ' ' + c.parsed.y + '\u00b0C' }, backgroundColor: '#1e2d45', titleColor: '#94a3b8', bodyColor: '#f1f5f9', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1 }
+      },
       scales: {
-        x: { ticks: { color: '#64748b', font: { size: 10 }, maxTicksLimit: 12 }, grid: { color: 'rgba(255,255,255,0.04)' }},
-        y: { min: Math.min(...temps) - 2, max: Math.max(...temps) + 2, ticks: { color: '#64748b', font: { size: 10 }, callback: v => v + '\u00b0' }, grid: { color: 'rgba(255,255,255,0.04)' }}
+        x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#64748b', font: { size: 10 }, callback: v => v + '\u00b0' }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });
